@@ -1,8 +1,10 @@
 from evdev import InputDevice, categorize, ecodes
-
-# dualshock 4 controller
+from gpiozero import LED
 
 import threading
+
+led_l = LED(17)
+led_r = LED(27)
 
 ####################################################### GLOBALS #######################################################
 
@@ -219,6 +221,16 @@ def main():
         for key in KEYS.keys():
             if KEYS[key]:
                 string += key + ' '
+        
+        if VALUES['motion_x'] > 4000:
+            led_l.on()
+        else:
+            led_l.off()
+        
+        if VALUES['motion_x'] < -4000:
+            led_r.on()
+        else:
+            led_r.off()
         
         print(string)
 
