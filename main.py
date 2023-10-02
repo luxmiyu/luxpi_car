@@ -1,10 +1,11 @@
 from evdev import InputDevice, categorize, ecodes
-from gpiozero import LED
+from gpiozero import LED, Servo
 
 import threading
 
 led_l = LED(17)
 led_r = LED(27)
+servo = Servo(22)
 
 ####################################################### GLOBALS #######################################################
 
@@ -113,6 +114,10 @@ except:
     print('Error: could not find devices')
     exit()
 
+print(touch_input.capabilities())
+print(motion_input.capabilities())
+print(gamepad_input.capabilities())
+
 def touch_loop():
     global touch_input
     global TOUCH
@@ -210,27 +215,35 @@ def main():
 
     while True:
         string = ''
+        
+        y = -VALUES['motion_x'] / 7500
 
         # VALUES
         string += f'motion: ({str(VALUES["motion_x"]).rjust(6)}, {str(VALUES["motion_y"]).rjust(6)}, {str(VALUES["motion_z"]).rjust(6)}) | '
         string += f'touch: ({str(VALUES["touch_x"]).rjust(4)}, {str(VALUES["touch_y"]).rjust(3)}) | '
         string += f'thumbl: ({str(VALUES["thumbl_x"]).rjust(3)}, {str(VALUES["thumbl_y"]).rjust(3)}) | '
         string += f'thumbr: ({str(VALUES["thumbr_x"]).rjust(3)}, {str(VALUES["thumbr_y"]).rjust(3)}) | '
+        string += f'servo: {y:1.3f} | '
 
         # KEYS
         for key in KEYS.keys():
             if KEYS[key]:
                 string += key + ' '
         
-        if VALUES['motion_x'] > 4000:
+        if VALUES['motion_z'] > 4000:
             led_l.on()
         else:
             led_l.off()
         
-        if VALUES['motion_x'] < -4000:
+        if VALUES['motion_z'] < -4000:
             led_r.on()
         else:
             led_r.off()
+
+        if y > 1.0: y = 1.0
+        if y < -1.0: y = -1.0
+
+        servo.value = y
         
         print(string)
 
