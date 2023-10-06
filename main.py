@@ -1,11 +1,11 @@
 from evdev import InputDevice, categorize, ecodes
 from gpiozero import LED, Servo
+import RPi.GPIO as GPIO
+from time import sleep
+import os
+import signal
 
 import threading
-
-led_l = LED(17)
-led_r = LED(27)
-servo = Servo(22)
 
 ####################################################### GLOBALS #######################################################
 
@@ -83,6 +83,8 @@ KEYS = {
     'circle': False,
     'triangle': False,
     'square': False,
+    'start': False,
+    'select': False,
 }
 
 VALUES = {
@@ -114,13 +116,16 @@ except:
     print('Error: could not find devices')
     exit()
 
-print(touch_input.capabilities())
-print(motion_input.capabilities())
-print(gamepad_input.capabilities())
+if False:
+    print(touch_input.capabilities())
+    print(motion_input.capabilities())
+    print(gamepad_input.capabilities())
 
 def touch_loop():
     global touch_input
     global TOUCH
+    global VALUES
+    global KEYS
 
     for event in touch_input.read_loop():
         name = TOUCH[event.code]
@@ -143,6 +148,8 @@ def touch_loop():
 def motion_loop():
     global motion_input
     global MOTION
+    global VALUES
+    global KEYS
 
     for event in motion_input.read_loop():
         name = MOTION[event.code]
@@ -165,6 +172,7 @@ def motion_loop():
 def gamepad_loop():
     global gamepad_input
     global GAMEPAD
+    global VALUES
     global KEYS
 
     for event in gamepad_input.read_loop():
@@ -188,6 +196,10 @@ def gamepad_loop():
                 KEYS['l2'] = event.value == 1
             elif name == 'BTN_TR2':
                 KEYS['r2'] = event.value == 1
+            elif name == 'BTN_SELECT':
+                KEYS['select'] = event.value == 1
+            elif name == 'BTN_START':
+                KEYS['start'] = event.value == 1
 
         elif event.type == ecodes.EV_ABS:
             if name == 'ABS_HAT0X':
@@ -209,43 +221,96 @@ def gamepad_loop():
             elif name == 'ABS_RZ':
                 KEYS['r3'] = event.value == 1
 
+####################################################### MAIN LOOP #######################################################
+
+def print_status(extra = []):
+    string = ''
+
+    # VALUES
+    string += f'motion: ({str(VALUES["motion_x"]).rjust(6)}, {str(VALUES["motion_y"]).rjust(6)}, {str(VALUES["motion_z"]).rjust(6)}) | '
+    string += f'touch: ({str(VALUES["touch_x"]).rjust(4)}, {str(VALUES["touch_y"]).rjust(3)}) | '
+    string += f'thumbl: ({str(VALUES["thumbl_x"]).rjust(3)}, {str(VALUES["thumbl_y"]).rjust(3)}) | '
+    string += f'thumbr: ({str(VALUES["thumbr_x"]).rjust(3)}, {str(VALUES["thumbr_y"]).rjust(3)}) | '
+
+    if extra.__len__() > 0:
+        string += ' | '.join(extra) + ' | '
+
+    # KEYS
+    for key in KEYS.keys():
+        if KEYS[key]:
+            string += key + ' '
+
+    print(string)
+
 def main(): 
     global KEYS
     global VALUES
 
+    show_status = False
+
+    in1 = 23
+    in2 = 24
+    en = 25
+
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setup(in1, GPIO.OUT)
+    GPIO.setup(in2, GPIO.OUT)
+    GPIO.setup(en, GPIO.OUT)
+    GPIO.output(in1, GPIO.LOW)
+    GPIO.output(in2, GPIO.LOW)
+
+    p = GPIO.PWM(en, 1000)
+    p.start(75)
+
+    MAX_SPEED = 100
+    MIN_SPEED = 50
+
+    def update_speed(analog):
+        analog_abs = abs(analog - 126)
+
+        if analog_abs < 10:
+            p.ChangeDutyCycle(MIN_SPEED)
+        
+        speed = int((analog_abs / 126) * (MAX_SPEED - MIN_SPEED) + MIN_SPEED)
+
+        if speed > MAX_SPEED:
+            speed = MAX_SPEED
+        elif speed < MIN_SPEED:
+            speed = MIN_SPEED
+
+        p.ChangeDutyCycle(speed)
+
     while True:
-        string = ''
+        if show_status: print_status()
         
-        y = -VALUES['motion_x'] / 7500
+        y = VALUES['thumbr_y']
+        deadzone = 16
 
-        # VALUES
-        string += f'motion: ({str(VALUES["motion_x"]).rjust(6)}, {str(VALUES["motion_y"]).rjust(6)}, {str(VALUES["motion_z"]).rjust(6)}) | '
-        string += f'touch: ({str(VALUES["touch_x"]).rjust(4)}, {str(VALUES["touch_y"]).rjust(3)}) | '
-        string += f'thumbl: ({str(VALUES["thumbl_x"]).rjust(3)}, {str(VALUES["thumbl_y"]).rjust(3)}) | '
-        string += f'thumbr: ({str(VALUES["thumbr_x"]).rjust(3)}, {str(VALUES["thumbr_y"]).rjust(3)}) | '
-        string += f'servo: {y:1.3f} | '
-
-        # KEYS
-        for key in KEYS.keys():
-            if KEYS[key]:
-                string += key + ' '
-        
-        if VALUES['motion_z'] > 4000:
-            led_l.on()
+        if y > 126 + deadzone:
+            update_speed(y)
+            GPIO.output(in1, GPIO.LOW)
+            GPIO.output(in2, GPIO.HIGH)
+        elif y < 126 - deadzone:
+            update_speed(y)
+            GPIO.output(in1, GPIO.HIGH)
+            GPIO.output(in2, GPIO.LOW)
         else:
-            led_l.off()
-        
-        if VALUES['motion_z'] < -4000:
-            led_r.on()
-        else:
-            led_r.off()
+            p.ChangeDutyCycle(0)
+            GPIO.output(in1, GPIO.LOW)
+            GPIO.output(in2, GPIO.LOW)
 
-        if y > 1.0: y = 1.0
-        if y < -1.0: y = -1.0
+        if KEYS['select']:
+            show_status = not show_status
 
-        servo.value = y
-        
-        print(string)
+            if show_status:
+                print('Showing status...')
+            else:
+                print('Hiding status...')
+
+        if KEYS['start']:
+            break
+
+    os.kill(os.getpid(), signal.SIGINT)
 
 ####################################################### START #######################################################
 
@@ -253,7 +318,16 @@ functions = [touch_loop, motion_loop, gamepad_loop, main]
 
 for f in functions:
     thread = threading.Thread(target=f)
+    thread.setDaemon(True)
     thread.start()
 
-while True:
-    pass
+try:
+    while True: pass
+except KeyboardInterrupt:
+    print('KeyboardInterrupt: exiting...')
+except:
+    print('Error: unknown exception')
+finally:
+    print('Cleaning up GPIO...')
+    GPIO.cleanup()
+    exit()
