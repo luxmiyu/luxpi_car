@@ -2,8 +2,7 @@ from evdev import InputDevice, categorize, ecodes
 from gpiozero import LED, Servo
 import RPi.GPIO as GPIO
 from time import sleep
-import os
-import signal
+import os, signal
 
 import threading
 
@@ -85,6 +84,7 @@ KEYS = {
     'square': False,
     'start': False,
     'select': False,
+    'mode': False,
 }
 
 VALUES = {
@@ -101,6 +101,133 @@ VALUES = {
     'thumbr_x': 0,
     'thumbr_y': 0,
 }
+
+KEYS_LAST = {
+    # touch
+    'one_finger': False,
+    'two_finger': False,
+    'touch': False,
+
+    # gamepad
+    'up': False,
+    'down': False,
+    'left': False,
+    'right': False,
+    'l1': False,
+    'l2': False,
+    'l3': False,
+    'r1': False,
+    'r2': False,
+    'r3': False,
+    'x': False,
+    'circle': False,
+    'triangle': False,
+    'square': False,
+    'start': False,
+    'select': False,
+    'mode': False,
+}
+
+VALUES_LAST = {
+    'touch_x': 0,
+    'touch_y': 0,
+    'motion_x': 0,
+    'motion_y': 0,
+    'motion_z': 0,
+    'motion_rx': 0,
+    'motion_ry': 0,
+    'motion_rz': 0,
+    'thumbl_x': 0,
+    'thumbl_y': 0,
+    'thumbr_x': 0,
+    'thumbr_y': 0,
+}
+
+KEYS_JUST_PRESSED = {
+    # touch
+    'one_finger': False,
+    'two_finger': False,
+    'touch': False,
+
+    # gamepad
+    'up': False,
+    'down': False,
+    'left': False,
+    'right': False,
+    'l1': False,
+    'l2': False,
+    'l3': False,
+    'r1': False,
+    'r2': False,
+    'r3': False,
+    'x': False,
+    'circle': False,
+    'triangle': False,
+    'square': False,
+    'start': False,
+    'select': False,
+    'mode': False,
+}
+
+KEYS_JUST_RELEASED = {
+    # touch
+    'one_finger': False,
+    'two_finger': False,
+    'touch': False,
+
+    # gamepad
+    'up': False,
+    'down': False,
+    'left': False,
+    'right': False,
+    'l1': False,
+    'l2': False,
+    'l3': False,
+    'r1': False,
+    'r2': False,
+    'r3': False,
+    'x': False,
+    'circle': False,
+    'triangle': False,
+    'square': False,
+    'start': False,
+    'select': False,
+    'mode': False,
+}
+
+VALUES_DELTA = {
+    'touch_x': 0,
+    'touch_y': 0,
+    'motion_x': 0,
+    'motion_y': 0,
+    'motion_z': 0,
+    'motion_rx': 0,
+    'motion_ry': 0,
+    'motion_rz': 0,
+    'thumbl_x': 0,
+    'thumbl_y': 0,
+    'thumbr_x': 0,
+    'thumbr_y': 0,
+}
+
+def update_keys():
+    for key in KEYS.keys():
+        value = KEYS[key]
+
+        if KEYS[key] and not KEYS_LAST[key]:
+            KEYS_JUST_PRESSED[key] = True
+        elif not KEYS[key] and KEYS_LAST[key]:
+            KEYS_JUST_RELEASED[key] = True
+        else:
+            KEYS_JUST_PRESSED[key] = False
+            KEYS_JUST_RELEASED[key] = False
+        
+        KEYS_LAST[key] = value
+
+def update_values():
+    for key in VALUES.keys():
+        VALUES_DELTA[key] = VALUES[key] - VALUES_LAST[key]
+        VALUES_LAST[key] = VALUES[key]
 
 ####################################################### LOOPS #######################################################
 
@@ -124,26 +251,31 @@ if False:
 def touch_loop():
     global touch_input
     global TOUCH
-    global VALUES
     global KEYS
+    global VALUES
+    global KEYS_LAST
+    global VALUES_LAST
+    global KEYS_JUST_PRESSED
+    global KEYS_JUST_RELEASED
+    global VALUES_DELTA
 
     for event in touch_input.read_loop():
         name = TOUCH[event.code]
         if not name: continue
 
-        if event.type == ecodes.EV_KEY:
-            if name == 'BTN_TOOL_FINGER':
-                KEYS['one_finger'] = event.value == 1
-            elif name == 'BTN_TOOL_DOUBLETAP':
-                KEYS['two_finger'] = event.value == 1
-            elif name == 'BTN_TOUCH':
-                KEYS['touch'] = event.value == 1
+        # EV_KEY
+        if name == 'BTN_TOOL_FINGER':
+            KEYS['one_finger'] = event.value == 1
+        elif name == 'BTN_TOOL_DOUBLETAP':
+            KEYS['two_finger'] = event.value == 1
+        elif name == 'BTN_TOUCH':
+            KEYS['touch'] = event.value == 1
 
-        elif event.type == ecodes.EV_ABS:
-            if name == 'ABS_X':
-                VALUES['touch_x'] = event.value
-            elif name == 'ABS_Y':
-                VALUES['touch_y'] = event.value
+        # EV_ABS
+        elif name == 'ABS_X':
+            VALUES['touch_x'] = event.value
+        elif name == 'ABS_Y':
+            VALUES['touch_y'] = event.value
 
 def motion_loop():
     global motion_input
@@ -200,6 +332,8 @@ def gamepad_loop():
                 KEYS['select'] = event.value == 1
             elif name == 'BTN_START':
                 KEYS['start'] = event.value == 1
+            elif name == 'BTN_MODE':
+                KEYS['mode'] = event.value == 1
 
         elif event.type == ecodes.EV_ABS:
             if name == 'ABS_HAT0X':
@@ -245,12 +379,23 @@ def print_status(extra = []):
 def main(): 
     global KEYS
     global VALUES
+    global KEYS_LAST
+    global VALUES_LAST
+    global KEYS_JUST_PRESSED
+    global KEYS_JUST_RELEASED
 
-    show_status = False
+    print('Started, press MODE to show status...')
+    
+    # ------------------------------------------ #
+
+    show_status = True
 
     in1 = 23
     in2 = 24
     en = 25
+
+    transistorPin = 17
+    transistorOn = False
 
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(in1, GPIO.OUT)
@@ -258,6 +403,9 @@ def main():
     GPIO.setup(en, GPIO.OUT)
     GPIO.output(in1, GPIO.LOW)
     GPIO.output(in2, GPIO.LOW)
+
+    GPIO.setup(transistorPin, GPIO.OUT)
+    GPIO.output(transistorPin, GPIO.LOW)
 
     p = GPIO.PWM(en, 1000)
     p.start(75)
@@ -281,7 +429,13 @@ def main():
         p.ChangeDutyCycle(speed)
 
     while True:
-        if show_status: print_status()
+        update_keys()
+        update_values()
+
+        if show_status: print_status([])
+        if KEYS['start']: break
+
+        # ------- START MAIN CODE ------- #
         
         y = VALUES['thumbr_y']
         deadzone = 16
@@ -299,16 +453,16 @@ def main():
             GPIO.output(in1, GPIO.LOW)
             GPIO.output(in2, GPIO.LOW)
 
-        if KEYS['select']:
+        if KEYS_JUST_PRESSED['select']:
             show_status = not show_status
+            print('show_status: ' + str(show_status))
+        
+        if KEYS_JUST_PRESSED['mode']:
+            transistorOn = not transistorOn
+            GPIO.output(transistorPin, GPIO.HIGH if transistorOn else GPIO.LOW)
+            print('transistor: ' + str(transistorOn))
 
-            if show_status:
-                print('Showing status...')
-            else:
-                print('Hiding status...')
-
-        if KEYS['start']:
-            break
+        # ------- END MAIN CODE ------- #
 
     os.kill(os.getpid(), signal.SIGINT)
 
@@ -325,8 +479,9 @@ try:
     while True: pass
 except KeyboardInterrupt:
     print('KeyboardInterrupt: exiting...')
-except:
+except Exception as e:
     print('Error: unknown exception')
+    print(e)
 finally:
     print('Cleaning up GPIO...')
     GPIO.cleanup()
