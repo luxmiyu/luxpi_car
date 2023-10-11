@@ -390,43 +390,76 @@ def main():
 
     show_status = True
 
+    # left motors
     in1 = 23
     in2 = 24
-    en = 25
+    en1 = 25
 
-    transistorPin = 17
+    # right motors
+    in3 = 17
+    in4 = 27
+    en2 = 22
+
+    transistorPin = 16
     transistorOn = False
 
     GPIO.setmode(GPIO.BCM)
-    GPIO.setup(in1, GPIO.OUT)
-    GPIO.setup(in2, GPIO.OUT)
-    GPIO.setup(en, GPIO.OUT)
-    GPIO.output(in1, GPIO.LOW)
-    GPIO.output(in2, GPIO.LOW)
 
     GPIO.setup(transistorPin, GPIO.OUT)
     GPIO.output(transistorPin, GPIO.LOW)
 
-    p = GPIO.PWM(en, 1000)
-    p.start(75)
+    # left motors
+    GPIO.setup(in1, GPIO.OUT)
+    GPIO.setup(in2, GPIO.OUT)
+    GPIO.setup(en1, GPIO.OUT)
+    GPIO.output(in1, GPIO.LOW)
+    GPIO.output(in2, GPIO.LOW)
+
+    # right motors
+    GPIO.setup(in3, GPIO.OUT)
+    GPIO.setup(in4, GPIO.OUT)
+    GPIO.setup(en2, GPIO.OUT)
+    GPIO.output(in3, GPIO.LOW)
+    GPIO.output(in4, GPIO.LOW)
+
+    p1 = GPIO.PWM(en1, 1000)
+    p1.start(75)
+
+    p2 = GPIO.PWM(en2, 1000)
+    p2.start(75)
 
     MAX_SPEED = 100
     MIN_SPEED = 50
+    DEADZONE = 0.25
 
-    def update_speed(analog):
-        analog_abs = abs(analog - 126)
+    def drive(side = "left", n = 0):
+        if side == "left":
+            [one, two, p] = [in1, in2, p1]
+        else:
+            [one, two, p] = [in3, in4, p2]
 
-        if analog_abs < 10:
-            p.ChangeDutyCycle(MIN_SPEED)
-        
-        speed = int((analog_abs / 126) * (MAX_SPEED - MIN_SPEED) + MIN_SPEED)
+        if n > 1: n = 1
+        elif n < -1: n = -1
 
-        if speed > MAX_SPEED:
-            speed = MAX_SPEED
-        elif speed < MIN_SPEED:
-            speed = MIN_SPEED
+        if n > DEADZONE:
+            GPIO.output(one, GPIO.HIGH)
+            GPIO.output(two, GPIO.LOW)
+        elif n < -DEADZONE:
+            GPIO.output(one, GPIO.LOW)
+            GPIO.output(two, GPIO.HIGH)
+        else:
+            GPIO.output(one, GPIO.LOW)
+            GPIO.output(two, GPIO.LOW)
 
-        p.ChangeDutyCycle(speed)
+        if n > -DEADZONE and n < DEADZONE:
+            p.ChangeDutyCycle(0)
+        else:
+            p.ChangeDutyCycle(abs(n) * (MAX_SPEED - MIN_SPEED) + MIN_SPEED)
+    
+    def drive_left(n): drive("left", n)
+    def drive_right(n): drive("right", n)
+
+    # ------- START MAIN CODE ------- #
 
     while True:
         update_keys()
@@ -434,24 +467,12 @@ def main():
 
         if show_status: print_status([])
         if KEYS['start']: break
-
-        # ------- START MAIN CODE ------- #
         
-        y = VALUES['thumbr_y']
-        deadzone = 16
+        left = (VALUES['thumbl_y'] - 126) / 126
+        right = (VALUES['thumbr_y'] - 126) / 126
 
-        if y > 126 + deadzone:
-            update_speed(y)
-            GPIO.output(in1, GPIO.LOW)
-            GPIO.output(in2, GPIO.HIGH)
-        elif y < 126 - deadzone:
-            update_speed(y)
-            GPIO.output(in1, GPIO.HIGH)
-            GPIO.output(in2, GPIO.LOW)
-        else:
-            p.ChangeDutyCycle(0)
-            GPIO.output(in1, GPIO.LOW)
-            GPIO.output(in2, GPIO.LOW)
+        drive_left(left)
+        drive_right(right)
 
         if KEYS_JUST_PRESSED['select']:
             show_status = not show_status
@@ -462,7 +483,7 @@ def main():
             GPIO.output(transistorPin, GPIO.HIGH if transistorOn else GPIO.LOW)
             print('transistor: ' + str(transistorOn))
 
-        # ------- END MAIN CODE ------- #
+    # ------- END MAIN CODE ------- #
 
     os.kill(os.getpid(), signal.SIGINT)
 
