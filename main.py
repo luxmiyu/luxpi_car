@@ -304,7 +304,9 @@ def touch_loop():
             KEYS['touch'] = event.value == 1
 
         # EV_ABS
-        elif name == 'ABS_X':
+        elif name == 'ABS_X' and event.value != 0:
+            # for some reason, the touchpad sends a lot of ABS_X events with value 0
+            # this is a workaround to prevent the cursor from jumping to the left
             VALUES['touch_x'] = event.value
         elif name == 'ABS_Y':
             VALUES['touch_y'] = event.value
