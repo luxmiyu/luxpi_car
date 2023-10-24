@@ -229,21 +229,53 @@ def update_values():
         VALUES_DELTA[key] = VALUES[key] - VALUES_LAST[key]
         VALUES_LAST[key] = VALUES[key]
 
+def update_all():
+    update_keys()
+    update_values()
+
 ####################################################### LOOPS #######################################################
+
+touch_name = "Wireless Controller Touchpad"
+motion_name = "Wireless Controller Motion Sensors"
+gamepad_name = "Wireless Controller"
 
 touch_input = None
 motion_input = None
 gamepad_input = None
 
-try:
-    touch_input = InputDevice('/dev/input/event2')
-    motion_input = InputDevice('/dev/input/event3')
-    gamepad_input = InputDevice('/dev/input/event4')
-except:
-    print('Error: could not find devices')
+print('-------------------------------------------------------')
+
+for i in range(0, 10):
+    try:
+        device = InputDevice(f'/dev/input/event{i}')
+        print('[' + device.path + '] ' + device.name)
+
+        if device.name == touch_name:
+            touch_input = device
+        elif device.name == motion_name:
+            motion_input = device
+        elif device.name == gamepad_name:
+            gamepad_input = device
+    except:
+        continue
+
+if not touch_input or not motion_input or not gamepad_input:
+    print('[ERROR] Missing input devices')
     exit()
 
+print('-------------------------------------------------------')
+print('  touch_input path: ' + touch_input.path)
+print(' motion_input path: ' + motion_input.path)
+print('gamepad_input path: ' + gamepad_input.path)
+print('-------------------------------------------------------')
+
 if False:
+    # names
+    print(touch_input.name)
+    print(motion_input.name)
+    print(gamepad_input.name)
+
+    # capabilities
     print(touch_input.capabilities())
     print(motion_input.capabilities())
     print(gamepad_input.capabilities())
@@ -357,24 +389,39 @@ def gamepad_loop():
 
 ####################################################### MAIN LOOP #######################################################
 
+def clear_line():
+    LINE_CLEAR = '\x1b[2K'
+    print(LINE_CLEAR, end= '\r')
+
+last_status_length = 0
+
 def print_status(extra = []):
-    string = ''
+    global last_status_length
+
+    string = '[STATUS] '
 
     # VALUES
     string += f'motion: ({str(VALUES["motion_x"]).rjust(6)}, {str(VALUES["motion_y"]).rjust(6)}, {str(VALUES["motion_z"]).rjust(6)}) | '
     string += f'touch: ({str(VALUES["touch_x"]).rjust(4)}, {str(VALUES["touch_y"]).rjust(3)}) | '
     string += f'thumbl: ({str(VALUES["thumbl_x"]).rjust(3)}, {str(VALUES["thumbl_y"]).rjust(3)}) | '
-    string += f'thumbr: ({str(VALUES["thumbr_x"]).rjust(3)}, {str(VALUES["thumbr_y"]).rjust(3)}) | '
+    string += f'thumbr: ({str(VALUES["thumbr_x"]).rjust(3)}, {str(VALUES["thumbr_y"]).rjust(3)})'
 
     if extra.__len__() > 0:
-        string += ' | '.join(extra) + ' | '
+        string += ' | ' + ' | '.join(extra)
+
+    separator_added = False
 
     # KEYS
     for key in KEYS.keys():
         if KEYS[key]:
+            if not separator_added:
+                string += ' | '
+                separator_added = True
+
             string += key + ' '
 
-    print(string)
+    print(string.ljust(last_status_length, ' '), end = '\r')
+    last_status_length = string.__len__()
 
 def main(): 
     global KEYS
@@ -384,7 +431,7 @@ def main():
     global KEYS_JUST_PRESSED
     global KEYS_JUST_RELEASED
 
-    print('Started, press MODE to show status...')
+    print('[SYSTEM] Starting')
     
     # ------------------------------------------ #
 
@@ -459,11 +506,10 @@ def main():
     def drive_left(n): drive("left", n)
     def drive_right(n): drive("right", n)
 
-    # ------- START MAIN CODE ------- #
+    # ------- START MAIN LOOP ------- #
 
     while True:
-        update_keys()
-        update_values()
+        update_all()
 
         if show_status: print_status([])
         if KEYS['start']: break
@@ -476,14 +522,16 @@ def main():
 
         if KEYS_JUST_PRESSED['select']:
             show_status = not show_status
-            print('show_status: ' + str(show_status))
+            clear_line()
+            print('[DEBUG] show_status: ' + str(show_status))
         
         if KEYS_JUST_PRESSED['mode']:
             transistorOn = not transistorOn
             GPIO.output(transistorPin, GPIO.HIGH if transistorOn else GPIO.LOW)
-            print('transistor: ' + str(transistorOn))
+            clear_line()
+            print('[DEBUG] transistor: ' + str(transistorOn))
 
-    # ------- END MAIN CODE ------- #
+    # ------- END MAIN LOOP ------- #
 
     os.kill(os.getpid(), signal.SIGINT)
 
@@ -493,17 +541,23 @@ functions = [touch_loop, motion_loop, gamepad_loop, main]
 
 for f in functions:
     thread = threading.Thread(target=f)
-    thread.setDaemon(True)
+    thread.daemon = True
     thread.start()
 
 try:
-    while True: pass
+    # loop forever
+    while True:
+        pass
 except KeyboardInterrupt:
-    print('KeyboardInterrupt: exiting...')
+    print('\n[SYSTEM] Detected keyboard interrupt')
 except Exception as e:
-    print('Error: unknown exception')
+    print('\n[ERROR] An unexpected error occurred')
     print(e)
 finally:
-    print('Cleaning up GPIO...')
+    clear_line()
+
+    print('[SYSTEM] Cleaning up GPIO')
     GPIO.cleanup()
+
+    print('[SYSTEM] Exiting')
     exit()
