@@ -1,7 +1,7 @@
 from evdev import InputDevice, categorize, ecodes
-from gpiozero import LED, Servo
+from gpiozero import LED, Servo, TonalBuzzer
 import RPi.GPIO as GPIO
-from time import sleep
+from time import sleep, time
 import os, signal
 
 import threading
@@ -221,7 +221,7 @@ def update_keys():
         else:
             KEYS_JUST_PRESSED[key] = False
             KEYS_JUST_RELEASED[key] = False
-        
+
         KEYS_LAST[key] = value
 
 def update_values():
@@ -305,8 +305,6 @@ def touch_loop():
 
         # EV_ABS
         elif name == 'ABS_X' and event.value != 0:
-            # for some reason, the touchpad sends a lot of ABS_X events with value 0
-            # this is a workaround to prevent the cursor from jumping to the left
             VALUES['touch_x'] = event.value
         elif name == 'ABS_Y':
             VALUES['touch_y'] = event.value
@@ -425,7 +423,7 @@ def print_status(extra = []):
     print(string.ljust(last_status_length, ' '), end = '\r')
     last_status_length = string.__len__()
 
-def main(): 
+def main():
     global KEYS
     global VALUES
     global KEYS_LAST
@@ -434,7 +432,7 @@ def main():
     global KEYS_JUST_RELEASED
 
     print('[SYSTEM] Starting')
-    
+
     # ------------------------------------------ #
 
     show_status = True
@@ -449,13 +447,18 @@ def main():
     in4 = 27
     en2 = 22
 
-    transistorPin = 16
-    transistorOn = False
+    # leds
+    led_front = LED(5)
+    led_back = LED(6)
+    led_left = LED(16)
+    led_right = LED(26)
+
+    # buzzer
+    buzzer = TonalBuzzer(12)
+
+    # ------------------------------------------ #
 
     GPIO.setmode(GPIO.BCM)
-
-    GPIO.setup(transistorPin, GPIO.OUT)
-    GPIO.output(transistorPin, GPIO.LOW)
 
     # left motors
     GPIO.setup(in1, GPIO.OUT)
@@ -504,20 +507,103 @@ def main():
             p.ChangeDutyCycle(0)
         else:
             p.ChangeDutyCycle(abs(n) * (MAX_SPEED - MIN_SPEED) + MIN_SPEED)
-    
+
     def drive_left(n): drive("left", n)
     def drive_right(n): drive("right", n)
 
     # ------- START MAIN LOOP ------- #
+
+    def control_car_wheels(x, y):
+        x = max(-1.0, min(1.0, x))
+        y = max(-1.0, min(1.0, y))
+        
+        left, right = 0, 0
+
+        led_front.off()
+        led_back.off()
+        led_left.off()
+        led_right.off()
+        
+        if abs(x) > 0.3:
+            left = -x
+            right = x
+            
+            if x < -0.1:
+                led_left.on()
+                led_right.off()
+            elif x > 0.1:
+                led_left.off()
+                led_right.on()
+        else:
+            left = y
+            right = y
+
+            if y < -0.1:
+                led_front.on()
+                led_back.off()
+            elif y > 0.1:
+                led_front.off()
+                led_back.on()
+
+        left = max(-1.0, min(1.0, left))
+        right = max(-1.0, min(1.0, right))
+
+        return left, right
+
+    def play_melody(notes = [('C4', 0.3), ('D4', 0.3), ('E4', 0.3), ('F4', 0.3), ('G4', 0.3), ('A4', 0.3), ('B4', 0.3), ('C5', 0.3)]):
+        total_time = 0.0
+
+        for note in notes:
+            total_time += note[1]
+
+        def melody():
+            next = time()
+            index = 0
+
+            stop = False
+
+            while not stop:
+                if time() >= next:
+                    if index < notes.__len__():
+                        buzzer.play(notes[index][0])
+                        next = time() + notes[index][1]
+                        index += 1
+                    else:
+                        stop = True
+
+            buzzer.stop()
+
+        thread = threading.Thread(target=melody)
+        thread.daemon = True
+        thread.start()
+
+        return total_time
 
     while True:
         update_all()
 
         if show_status: print_status([])
         if KEYS['start']: break
-        
-        left = (VALUES['thumbl_y'] - 126) / 126
-        right = (VALUES['thumbr_y'] - 126) / 126
+
+        thumb_x = (VALUES['thumbl_x'] - 126) / 126
+        thumb_y = (VALUES['thumbr_y'] - 126) / 126
+        gyro_x = -(VALUES['motion_x']) / 7000
+        gyro_y = -(VALUES['motion_z']) / 7000
+
+        if (thumb_x < -1.0): thumb_x = -1.0
+        if (thumb_x > 1.0): thumb_x = 1.0
+        if (thumb_y < -1.0): thumb_y = -1.0
+        if (thumb_y > 1.0): thumb_y = 1.0
+
+        if (gyro_x < -1.0): gyro_x = -1.0
+        if (gyro_x > 1.0): gyro_x = 1.0
+        if (gyro_y < -1.0): gyro_y = -1.0
+        if (gyro_y > 1.0): gyro_y = 1.0
+
+        left, right = control_car_wheels(thumb_x, thumb_y)
+
+        if (KEYS['x']):
+            left, right = control_car_wheels(gyro_x, gyro_y)
 
         drive_left(left)
         drive_right(right)
@@ -527,11 +613,29 @@ def main():
             clear_line()
             print('[DEBUG] show_status: ' + str(show_status))
         
-        if KEYS_JUST_PRESSED['mode']:
-            transistorOn = not transistorOn
-            GPIO.output(transistorPin, GPIO.HIGH if transistorOn else GPIO.LOW)
-            clear_line()
-            print('[DEBUG] transistor: ' + str(transistorOn))
+        if KEYS['square']:
+            buzzer.stop()
+        elif KEYS['down']:
+            buzzer.play('C4')
+        elif KEYS['left']:
+            buzzer.play('D4')
+        elif KEYS['up']:
+            buzzer.play('E4')
+        elif KEYS['right']:
+            buzzer.play('F4')
+        elif KEYS['l1']:
+            buzzer.play('G4')
+        elif KEYS['r1']:
+            buzzer.play('A4')
+        elif KEYS['l2']:
+            buzzer.play('B4')
+        elif KEYS['r2']:
+            buzzer.play('C5')
+        elif KEYS_JUST_RELEASED['square'] or KEYS_JUST_RELEASED['down'] or KEYS_JUST_RELEASED['left'] or KEYS_JUST_RELEASED['up'] or KEYS_JUST_RELEASED['right'] or KEYS_JUST_RELEASED['l1'] or KEYS_JUST_RELEASED['r1'] or KEYS_JUST_RELEASED['l2'] or KEYS_JUST_RELEASED['r2']:
+            buzzer.stop()
+
+        if KEYS_JUST_PRESSED['triangle']:
+            play_melody()
 
     # ------- END MAIN LOOP ------- #
 
